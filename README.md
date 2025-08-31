@@ -32,7 +32,7 @@ source .venv/bin/activate
 pip install --upgrade pip
 pip install PyQt5 selenium
 
-python lms_downloader.py
+python main.py
 ```
 
 ### 2) Windows
@@ -48,5 +48,5 @@ python -m venv .venv
 pip install --upgrade pip
 pip install PyQt5 selenium
 
-python lms_downloader.py
+python main.py
 ```

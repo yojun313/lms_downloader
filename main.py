@@ -1,4 +1,4 @@
-# lms_downloader.py
+# main.py
 import sys
 import re
 import time
