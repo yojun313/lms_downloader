@@ -3,7 +3,7 @@ import sys
 import re
 import time
 import unicodedata
-import os, subprocess
+import os
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
@@ -19,15 +19,76 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException, UnexpectedAlertPresentException, NoAlertPresentException
+import platform
+from datetime import datetime
+
+
+# 파일 상단 import 근처
+from PyQt5.QtWidgets import QStyleFactory, QTableWidget, QTableWidgetItem, QHeaderView, QProgressBar, QGroupBox, QGridLayout, QSplitter
+from PyQt5.QtGui import QIcon, QFont
+from PyQt5.QtCore import Qt
+
+def apply_modern_theme(app: QApplication):
+    # Fusion + 다크 팔레트
+    app.setStyle(QStyleFactory.create("Fusion"))
+    pal = app.palette()
+    pal.setColor(pal.Window,        Qt.black)
+    pal.setColor(pal.WindowText,    Qt.white)
+    pal.setColor(pal.Base,          Qt.black)
+    pal.setColor(pal.AlternateBase, Qt.black)
+    pal.setColor(pal.ToolTipBase,   Qt.white)
+    pal.setColor(pal.ToolTipText,   Qt.black)
+    pal.setColor(pal.Text,          Qt.white)
+    pal.setColor(pal.Button,        Qt.black)
+    pal.setColor(pal.ButtonText,    Qt.white)
+    pal.setColor(pal.Highlight,     Qt.darkGray)
+    pal.setColor(pal.HighlightedText, Qt.white)
+    app.setPalette(pal)
+
+    # 전역 폰트/사이즈
+    app.setFont(QFont("Apple SD Gothic Neo" if sys.platform == "darwin" else "Segoe UI", 11))
+
+    # 전역 스타일시트 (패딩, 포커스, 호버)
+    app.setStyleSheet("""
+    QWidget { font-size: 11pt; }
+    QGroupBox { 
+        font-weight: 600; 
+        border: 1px solid #3a3a3a; 
+        border-radius: 8px; 
+        margin-top: 16px; 
+        padding: 12px;
+    }
+    QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 4px; }
+    QLineEdit, QTextEdit, QPlainTextEdit { 
+        border: 1px solid #4a4a4a; 
+        border-radius: 6px; 
+        padding: 8px; 
+        background: #101010; 
+        selection-background-color: #3a3a3a;
+    }
+    QPushButton {
+        border: 1px solid #5a5a5a; border-radius: 8px; padding: 8px 14px; background: #1a1a1a;
+    }
+    QPushButton:hover { background: #222; }
+    QPushButton:pressed { background: #111; }
+    QPushButton[primary="true"] { 
+        background: #2d6cdf; border-color: #2d6cdf; color: white; font-weight: 600;
+    }
+    QTableWidget { border: 1px solid #3a3a3a; border-radius: 8px; }
+    QHeaderView::section { background: #1a1a1a; border: none; padding: 6px; }
+    QProgressBar { border: 1px solid #3a3a3a; border-radius: 6px; text-align: center; }
+    QProgressBar::chunk { background: #2d6cdf; border-radius: 6px; }
+    """)
+
 
 def open_folder(path: str):
-    """OS별로 파일 탐색기 열기"""
-    if sys.platform.startswith("darwin"):  # macOS
-        subprocess.run(["open", path])
-    elif os.name == "nt":  # Windows
+    # 저장된 폴더를 파일 탐색기로 열기
+    if platform.system() == "Windows":
         os.startfile(path)
-    elif os.name == "posix":  # Linux
-        subprocess.run(["xdg-open", path])
+    elif platform.system() == "Darwin":  # macOS
+        os.system(f"open '{path}'")
+    else:  # Linux and other OS
+        os.system(f"xdg-open '{path}'")
 
 # ---------------------- 유틸 ----------------------
 def extract_id_from_url(u: str) -> str:
@@ -130,7 +191,7 @@ class HlsDownloader(QWidget):
         )
 
         # --- 출력 폴더
-        self.out_dir_edit = QLineEdit(str(Path.home() / "Documents"))
+        self.out_dir_edit = QLineEdit(str(Path.home() / "Documents" / "강의"))
         btn_dir = QPushButton("저장 폴더...")
         btn_dir.clicked.connect(self.choose_out_dir)
 
@@ -159,43 +220,119 @@ class HlsDownloader(QWidget):
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
 
-        # --- 레이아웃
-        root = QVBoxLayout()
+        # --- 레이아웃 (교체 시작)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(12)
 
-        row = QHBoxLayout()
-        row.addWidget(QLabel("LMS 강의 URL들(줄바꿈 구분):"))
-        root.addLayout(row)
-        root.addWidget(self.urls_edit)
+        # ▶︎ 상단 툴바풍 버튼 행
+        toolbar = QHBoxLayout()
+        for btn, primary in [
+            (self.btn_login, False),
+            (self.btn_fetch, True),
+            (self.btn_stop,  False),
+            (self.btn_close_browser, False),
+        ]:
+            btn.setProperty("primary", "true" if primary else "false")
+            toolbar.addWidget(btn)
+        toolbar.addStretch(1)
+        root.addLayout(toolbar)
 
-        row = QHBoxLayout()
-        row.addWidget(QLabel("저장 폴더:"))
-        row.addWidget(self.out_dir_edit, 1)
-        row.addWidget(btn_dir)
-        root.addLayout(row)
+        # ▶︎ 기본 정보 섹션
+        box_inputs = QGroupBox("입력 / 출력")
+        g1 = QGridLayout()
+        g1.setHorizontalSpacing(10)
+        g1.setVerticalSpacing(8)
+        row = 0
 
-        row = QHBoxLayout()
-        row.addWidget(QLabel("User-Agent:"))
-        row.addWidget(self.ua_edit)
-        root.addLayout(row)
+        g1.addWidget(QLabel("LMS 강의 URL들 (줄바꿈 구분)"), row, 0, 1, 3); row += 1
+        self.urls_edit.setMinimumHeight(100)
+        g1.addWidget(self.urls_edit, row, 0, 1, 3); row += 1
 
-        root.addWidget(self.chk_copy)
+        g1.addWidget(QLabel("저장 폴더"), row, 0)
+        g1.addWidget(self.out_dir_edit, row, 1)
+        g1.addWidget(btn_dir, row, 2); row += 1
 
-        row = QHBoxLayout()
-        row.addWidget(self.btn_login)
-        row.addWidget(self.btn_fetch)
-        row.addWidget(self.btn_stop)
-        row.addWidget(self.btn_close_browser)
-        root.addLayout(row)
+        box_inputs.setLayout(g1)
+        root.addWidget(box_inputs)
 
-        root.addWidget(QLabel("로그"))
-        root.addWidget(self.log, 1)
+        # ▶︎ 옵션 섹션
+        box_opts = QGroupBox("옵션")
+        g2 = QGridLayout()
+        r = 0
+        g2.addWidget(QLabel("User-Agent"), r, 0)
+        g2.addWidget(self.ua_edit,       r, 1, 1, 2); r += 1
 
-        self.setLayout(root)
+        optrow = QHBoxLayout()
+        
+        self.chk_mp3 = QCheckBox("MP3로 변환 저장")
+        self.chk_mp3.setChecked(False)
+        optrow.addWidget(self.chk_copy)
+        optrow.addWidget(self.chk_mp3)
+        optrow.addStretch(1)
+        g2.addLayout(optrow, r, 0, 1, 3); r += 1
 
+        box_opts.setLayout(g2)
+        root.addWidget(box_opts)
+
+        # ▶︎ 작업/로그 영역 Splitter
+        split = QSplitter(Qt.Horizontal)
+        split.setChildrenCollapsible(False)
+
+        # 대기열 테이블
+        self.tbl = QTableWidget(0, 4, self)
+        self.tbl.setHorizontalHeaderLabels(["URL", "제목", "상태", "출력 파일"])
+        self.tbl.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.tbl.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.tbl.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.tbl.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.tbl.verticalHeader().setVisible(False)
+        self.tbl.setSelectionBehavior(self.tbl.SelectRows)
+        self.tbl.setEditTriggers(self.tbl.NoEditTriggers)
+
+        # 로그
+        log_wrap = QGroupBox("로그")
+        vlog = QVBoxLayout(log_wrap)
+        self.log.setMinimumWidth(360)
+        self.log.setReadOnly(True)
+        vlog.addWidget(self.log)
+
+        split.addWidget(self.tbl)
+        split.addWidget(log_wrap)
+        split.setStretchFactor(0, 3)
+        split.setStretchFactor(1, 2)
+        root.addWidget(split, 1)
+
+        # ▶︎ 하단 상태바
+        status = QHBoxLayout()
+        self.progress = QProgressBar()
+        self.progress.setMinimum(0); self.progress.setMaximum(100); self.progress.setValue(0)
+        self.lbl_status = QLabel("대기 중")
+        status.addWidget(self.lbl_status)
+        status.addStretch(1)
+        status.addWidget(self.progress)
+        root.addLayout(status)
+        # --- 레이아웃 (교체 끝)
+
+
+    def open_output_dir(self):
+        out_dir = Path(self.out_dir_edit.text().strip() or ".").resolve()
+        try:
+            open_folder(str(out_dir))
+            self.append_log(f"[INFO] 탐색기 열기: {out_dir}\n")
+        except Exception as e:
+            self.append_log(f"[WARN] 탐색기 열기 실패: {e}\n")
     # ---------- 공용 ----------
+    
     def append_log(self, text: str):
+        ts = datetime.now().strftime("[%H:%M:%S] ")
+        # 여러 줄 들어올 때도 앞줄에만 타임스탬프 달기
+        if text.endswith("\n"):
+            text = text[:-1]
+        lines = text.split("\n")
+        stamped = "\n".join([ (ts + lines[0]) ] + [(" " * len(ts) + L) for L in lines[1:]]) + "\n"
         self.log.moveCursor(self.log.textCursor().End)
-        self.log.insertPlainText(text)
+        self.log.insertPlainText(stamped)
         self.log.moveCursor(self.log.textCursor().End)
 
     # ---------- 브라우저/로그인 ----------
@@ -277,21 +414,28 @@ class HlsDownloader(QWidget):
                 vid = extract_id_from_url(page_url)
                 base = sanitize_filename(page_title) if page_title else f"lms_{vid}"
 
+                ext = ".mp3" if self.chk_mp3.isChecked() else ".mp4"
                 candidate = base
                 suffix = 1
                 while True:
-                    out_path = out_dir / f"{candidate}.mp4"
+                    out_path = out_dir / f"{candidate}{ext}"
                     out_str = str(out_path)
                     if (not out_path.exists()) and (out_str not in existing_outputs):
                         break
                     suffix += 1
                     candidate = f"{base} ({suffix})"
 
-                out_file = str(out_dir / f"{candidate}.mp4")
+                out_file = str(out_dir / f"{candidate}{ext}")
                 existing_outputs.add(out_file)
 
                 referer = page_url  # 각 페이지를 참조 리퍼러로 사용
                 self.pending_jobs.append((page_url, m3u8, out_file, referer))
+                row = self.tbl.rowCount()
+                self.tbl.insertRow(row)
+                self.tbl.setItem(row, 0, QTableWidgetItem(page_url))
+                self.tbl.setItem(row, 1, QTableWidgetItem(page_title or ""))
+                self.tbl.setItem(row, 2, QTableWidgetItem("대기"))
+                self.tbl.setItem(row, 3, QTableWidgetItem(out_file))
                 self.append_log(
                     f"[OK] 추출: {page_url}\n"
                     f"     제목: {page_title or '(없음)'}\n"
@@ -317,6 +461,15 @@ class HlsDownloader(QWidget):
 
         self.append_log(f"[INFO] 총 {len(self.pending_jobs)}개 항목 다운로드 시작...\n")
         self.run_next_job()
+
+    def _find_row_for_current(self) -> int:
+        if not self.current_job: 
+            return -1
+        page_url, _, out_file, _ = self.current_job
+        for r in range(self.tbl.rowCount()):
+            if self.tbl.item(r, 0).text() == page_url and self.tbl.item(r, 3).text() == out_file:
+                return r
+        return -1
 
     def extract_m3u8_and_title_from_page(self, page_url: str):
         self.driver.get(page_url)
@@ -375,17 +528,33 @@ class HlsDownloader(QWidget):
 
     # ---------- ffmpeg 실행 ----------
     def run_next_job(self):
+
+
         if self.proc and self.proc.state() != QProcess.NotRunning:
             return  # 현재 작업이 끝나길 기다림
 
         if not self.pending_jobs:
             self.append_log("[DONE] 모든 다운로드 완료.\n")
             self.btn_stop.setEnabled(False)
+            # ★ 모든 작업 종료 시 저장 폴더 자동 열기
+            self.open_output_dir()
             return
 
         self.current_job = self.pending_jobs.pop(0)
         page_url, m3u8, out_file, referer = self.current_job
 
+                # 진행률/상태
+        total = len(self.pending_jobs) + 1  # 현재 포함
+        done  = 0
+        self.progress.setMaximum(total)
+        self.progress.setValue(self.progress.maximum() - len(self.pending_jobs) - 1)  # 이미 끝난 개수
+        self.lbl_status.setText("다운로드 중...")
+
+        # 테이블 상태 표시
+        r = self._find_row_for_current()
+        if r >= 0:
+            self.tbl.item(r, 2).setText("진행 중")
+            
         if not self.is_ffmpeg_available():
             QMessageBox.critical(self, "ffmpeg 미설치", "ffmpeg 실행 파일을 찾을 수 없습니다.")
             self.pending_jobs.clear()
@@ -421,14 +590,28 @@ class HlsDownloader(QWidget):
                 headers.append(f"Cookie: {cookie_header}")
 
         if headers:
-            cmd += ["-headers", "\\r\\n".join(headers)]
+            # FFmpeg는 각 헤더 라인을 CRLF로 구분하고, 마지막에도 CRLF가 하나 더 필요합니다.
+            header_str = "\r\n".join(headers) + "\r\n"
+            cmd += ["-headers", header_str]
 
         cmd += ["-i", m3u8]
 
-        if self.chk_copy.isChecked():
-            cmd += ["-map", "0:v:0?", "-map", "0:a:0?", "-c", "copy"]
+        if self.chk_mp3.isChecked():
+            # 오디오만 mp3로 변환
+            cmd += [
+                "-map", "0:a:0",
+                "-vn",
+                "-c:a", "libmp3lame",
+                "-b:a", "192k",
+            ]
+        else:
+            if self.chk_copy.isChecked():
+                cmd += ["-map", "0:v:0?", "-map", "0:a:0?", "-c", "copy"]
+            else:
+                cmd += ["-map", "0:v:0?", "-map", "0:a:0?", "-c:v", "libx264", "-c:a", "aac", "-b:a", "192k"]
 
         cmd += [out_file]
+        
 
         self.proc = QProcess(self)
         self.proc.setProcessChannelMode(QProcess.MergedChannels)
@@ -436,7 +619,9 @@ class HlsDownloader(QWidget):
         self.proc.readyReadStandardError.connect(self.on_read_output)
         self.proc.finished.connect(self.on_finished_one)
 
-        self.append_log(f"[RUN] {page_url}\n      → {out_file}\n      ffmpeg: {' '.join(cmd)}\n")
+        mode = "MP3 변환" if self.chk_mp3.isChecked() else ("copy" if self.chk_copy.isChecked() else "re-encode")
+        self.append_log(f"[RUN] {page_url}\n      → {out_file}\n      모드: {mode}\n      ffmpeg: {' '.join(cmd)}\n")
+
         self.btn_stop.setEnabled(True)
         self.proc.start(cmd[0], cmd[1:])
 
@@ -457,10 +642,24 @@ class HlsDownloader(QWidget):
 
     def on_finished_one(self, code, status):
         page_url, m3u8, out_file, _ = self.current_job or ("", "", "", "")
+        ok = (code == 0)
         self.append_log(f"\n[INFO] 완료(code={code}): {out_file}\n\n")
+
+        r = self._find_row_for_current()
+        if r >= 0:
+            self.tbl.item(r, 2).setText("완료" if ok else "실패")
+
+        # 진행률 증가
+        self.progress.setValue(self.progress.value() + 1)
+        if not self.pending_jobs:
+            self.lbl_status.setText("모든 작업 완료")
+        else:
+            self.lbl_status.setText(f"다음 작업 준비 중... (남은 {len(self.pending_jobs)}개)")
+
         self.btn_stop.setEnabled(False)
         self.current_job = None
         self.run_next_job()
+
 
     def stop_current(self):
         if self.proc and self.proc.state() != QProcess.NotRunning:
@@ -484,6 +683,7 @@ class HlsDownloader(QWidget):
 # ---------------------- 엔트리포인트 ----------------------
 def main():
     app = QApplication(sys.argv)
+    apply_modern_theme(app)   # ★ 추가
     w = HlsDownloader()
     w.show()
     sys.exit(app.exec_())
