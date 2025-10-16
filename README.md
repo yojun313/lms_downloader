@@ -45,7 +45,6 @@ cd <프로젝트-폴더>
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 
-pip install --upgrade pip
 pip install -r requirements.txt
 
 python main.py
