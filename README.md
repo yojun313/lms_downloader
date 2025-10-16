@@ -46,7 +46,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 
 pip install --upgrade pip
-pip install PyQt5 selenium
+pip install -r requirements.txt
 
 python main.py
 ```
