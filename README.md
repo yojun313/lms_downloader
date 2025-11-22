@@ -25,12 +25,13 @@
 brew install ffmpeg
 brew install python
 
+터미널 종료 후 재실행 (환경변수 설정 반영)
+
 cd <프로젝트-폴더>
 python3 -m venv .venv
 source .venv/bin/activate
 
-pip install --upgrade pip
-pip install PyQt5 selenium
+pip install -r requirements.txt
 
 python main.py
 ```
@@ -41,12 +42,13 @@ python main.py
 winget install Gyan.FFmpeg
 # 또는 choco install ffmpeg
 
+터미널 종료 후 재실행 (환경변수 설정 반영)
+
 cd <프로젝트-폴더>
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 
-pip install --upgrade pip
-pip install PyQt5 selenium
+pip install -r requirements.txt
 
 python main.py
 ```
