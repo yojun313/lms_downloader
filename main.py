@@ -29,7 +29,6 @@ from PyQt5.QtGui import QIcon, QFont
 from PyQt5.QtCore import Qt
 
 def apply_modern_theme(app: QApplication):
-    # Fusion + 다크 팔레트
     app.setStyle(QStyleFactory.create("Fusion"))
     pal = app.palette()
     pal.setColor(pal.Window,        Qt.black)
@@ -45,10 +44,8 @@ def apply_modern_theme(app: QApplication):
     pal.setColor(pal.HighlightedText, Qt.white)
     app.setPalette(pal)
 
-    # 전역 폰트/사이즈
     app.setFont(QFont("Apple SD Gothic Neo" if sys.platform == "darwin" else "Segoe UI", 11))
 
-    # 전역 스타일시트 (패딩, 포커스, 호버)
     app.setStyleSheet("""
     QWidget { font-size: 11pt; }
     QGroupBox { 
@@ -90,7 +87,7 @@ def open_folder(path: str):
     else:  # Linux and other OS
         os.system(f"xdg-open '{path}'")
 
-# ---------------------- 유틸 ----------------------
+# -------------------유틸 ----------------------
 def extract_id_from_url(u: str) -> str:
     """?id= 숫자 뽑기 (없으면 도메인+타임스탬프)"""
     try:
@@ -116,32 +113,19 @@ def sanitize_filename(name: str, max_len: int = 150) -> str:
     """
     파일 시스템에 안전한 파일명 생성 + 글자 사이 공백 보정
     """
-    # 1) 정규화 & 트림
     name = unicodedata.normalize("NFKC", name or "").strip()
 
-    # 2) 금지문자 제거
     forbidden = '<>:"/\\|?*\0'
     name = "".join("" if ch in forbidden else ch for ch in name)
 
-    # 3) 라틴 문자 사이 공백 제거 (L e c t u r e -> Lecture)
     name = re.sub(r'(?<=[A-Za-z])\s+(?=[A-Za-z])', '', name)
-
-    # 4) 여러 종류의 공백을 한 칸으로
     name = re.sub(r'\s+', ' ', name)
-
-    # 5) 구두점/하이픈 주변 정돈
-    #   - 쉼표/닫는 괄호 앞 공백 제거: " ,", " ]" 등
     name = re.sub(r'\s+,', ',', name)
     name = re.sub(r'\s+([\)\]\}])', r'\1', name)
-    #   - 하이픈 주변은 양쪽 한 칸: " - "
     name = re.sub(r'\s*-\s*', ' - ', name)
-    #   - 여는 괄호/대괄호 뒤 공백 제거
     name = re.sub(r'([\(\[\{])\s+', r'\1', name)
-
-    # 6) 남은 제어문자 치환
     name = "".join(ch if (ch.isprintable()) else " " for ch in name).strip()
 
-    # 7) 길이 제한
     if not name:
         name = "untitled"
     if len(name) > max_len:
@@ -171,7 +155,7 @@ def build_cookie_header_from_driver(driver, target_url: str) -> str:
     return "; ".join(pairs)
 
 
-# ---------------------- 메인 GUI ----------------------
+# -------------------메인 GUI ----------------------
 class HlsDownloader(QWidget):
     def __init__(self):
         super().__init__()
@@ -183,26 +167,26 @@ class HlsDownloader(QWidget):
         self.pending_jobs = []      # (page_url, m3u8_url, out_file, referer)
         self.current_job = None
 
-        # --- URL들 입력 (여러 줄)
+        # URL들 입력 (여러 줄)
         self.urls_edit = QTextEdit()
         self.urls_edit.setPlaceholderText(
             "https://ys.learnus.org/mod/vod/viewer.php?id=4110793\n"
             "https://plms.postech.ac.kr/mod/vod/viewer.php?id=196921"
         )
 
-        # --- 출력 폴더
+        # 출력 폴더
         self.out_dir_edit = QLineEdit(str(Path.home() / "Documents" / "강의"))
         btn_dir = QPushButton("저장 폴더...")
         btn_dir.clicked.connect(self.choose_out_dir)
 
-        # --- 옵션 (User-Agent, -c copy)
+        # 옵션 (User-Agent, -c copy)
         self.ua_edit = QLineEdit(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome Safari"
         )
         self.chk_copy = QCheckBox("재인코딩 없이 저장(-c copy)")
         self.chk_copy.setChecked(True)
 
-        # --- 제어 버튼
+        # 제어 버튼
         self.btn_login = QPushButton("로그인 시작(브라우저 열기)")
         self.btn_fetch = QPushButton("추출+다운로드 시작")
         self.btn_stop = QPushButton("현재 항목 중지")
@@ -216,16 +200,16 @@ class HlsDownloader(QWidget):
         self.btn_stop.clicked.connect(self.stop_current)
         self.btn_close_browser.clicked.connect(self.close_browser)
 
-        # --- 로그창
+        # 로그창
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
 
-        # --- 레이아웃 (교체 시작)
+        # 레이아웃 (교체 시작)
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 14, 14, 14)
         root.setSpacing(12)
 
-        # ▶︎ 상단 툴바풍 버튼 행
+        # 상단 툴바풍 버튼 행
         toolbar = QHBoxLayout()
         for btn, primary in [
             (self.btn_login, False),
@@ -238,7 +222,7 @@ class HlsDownloader(QWidget):
         toolbar.addStretch(1)
         root.addLayout(toolbar)
 
-        # ▶︎ 기본 정보 섹션
+        # 기본 정보 섹션
         box_inputs = QGroupBox("입력 / 출력")
         g1 = QGridLayout()
         g1.setHorizontalSpacing(10)
@@ -256,7 +240,7 @@ class HlsDownloader(QWidget):
         box_inputs.setLayout(g1)
         root.addWidget(box_inputs)
 
-        # ▶︎ 옵션 섹션
+        # 옵션 섹션
         box_opts = QGroupBox("옵션")
         g2 = QGridLayout()
         r = 0
@@ -275,7 +259,7 @@ class HlsDownloader(QWidget):
         box_opts.setLayout(g2)
         root.addWidget(box_opts)
 
-        # ▶︎ 작업/로그 영역 Splitter
+        # 작업/로그 영역 Splitter
         split = QSplitter(Qt.Horizontal)
         split.setChildrenCollapsible(False)
 
@@ -303,7 +287,7 @@ class HlsDownloader(QWidget):
         split.setStretchFactor(1, 2)
         root.addWidget(split, 1)
 
-        # ▶︎ 하단 상태바
+        # 하단 상태바
         status = QHBoxLayout()
         self.progress = QProgressBar()
         self.progress.setMinimum(0); self.progress.setMaximum(100); self.progress.setValue(0)
@@ -312,7 +296,7 @@ class HlsDownloader(QWidget):
         status.addStretch(1)
         status.addWidget(self.progress)
         root.addLayout(status)
-        # --- 레이아웃 (교체 끝)
+        # 레이아웃 (교체 끝)
 
 
     def open_output_dir(self):
@@ -322,7 +306,6 @@ class HlsDownloader(QWidget):
             self.append_log(f"[INFO] 탐색기 열기: {out_dir}\n")
         except Exception as e:
             self.append_log(f"[WARN] 탐색기 열기 실패: {e}\n")
-    # ---------- 공용 ----------
     
     def append_log(self, text: str):
         ts = datetime.now().strftime("[%H:%M:%S] ")
@@ -335,7 +318,6 @@ class HlsDownloader(QWidget):
         self.log.insertPlainText(stamped)
         self.log.moveCursor(self.log.textCursor().End)
 
-    # ---------- 브라우저/로그인 ----------
     def start_browser_and_login(self):
         """Selenium 크롬을 띄우고 사용자가 직접 로그인할 수 있게 함."""
         if self.driver:
@@ -356,12 +338,8 @@ class HlsDownloader(QWidget):
 
         self.append_log(f"[INFO] 크롬 브라우저 시작... (로그인 페이지: {start_url})\n")
         options = Options()
-        # 로그인 시 창이 보여야 하므로 headless 금지
-        # 장기 세션 유지 원하면 아래 주석 해제: 다음 실행에도 로그인 유지됨(개인 PC 권장)
-        # options.add_argument(f"--user-data-dir={Path.cwd() / 'chrome_profile'}")
         driver = webdriver.Chrome(options=options)
 
-        # 도메인 루트로 이동 → 로그인 유도
         driver.get(start_url)
 
         QMessageBox.information(
@@ -383,7 +361,6 @@ class HlsDownloader(QWidget):
             self.driver = None
             self.append_log("[INFO] 브라우저 종료.\n")
 
-    # ---------- 추출 + 다운로드 ----------
     def start_batch(self):
         if not self.driver:
             QMessageBox.warning(self, "로그인 필요", "먼저 '로그인 시작'으로 브라우저를 열고 로그인하세요.")
@@ -526,7 +503,6 @@ class HlsDownloader(QWidget):
         except NoSuchElementException:
             return ""
 
-    # ---------- ffmpeg 실행 ----------
     def run_next_job(self):
 
 
@@ -536,7 +512,7 @@ class HlsDownloader(QWidget):
         if not self.pending_jobs:
             self.append_log("[DONE] 모든 다운로드 완료.\n")
             self.btn_stop.setEnabled(False)
-            # ★ 모든 작업 종료 시 저장 폴더 자동 열기
+            # 모든 작업 종료 시 저장 폴더 자동 열기
             self.open_output_dir()
             return
 
@@ -668,7 +644,6 @@ class HlsDownloader(QWidget):
             self.proc.waitForFinished(2000)
             self.btn_stop.setEnabled(False)
 
-    # ---------- 기타 ----------
     def choose_out_dir(self):
         d = QFileDialog.getExistingDirectory(self, "저장 폴더 선택", self.out_dir_edit.text())
         if d:
@@ -680,7 +655,6 @@ class HlsDownloader(QWidget):
         return which("ffmpeg") is not None
 
 
-# ---------------------- 엔트리포인트 ----------------------
 def main():
     app = QApplication(sys.argv)
     apply_modern_theme(app)   # ★ 추가
