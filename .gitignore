@@ -76,3 +76,4 @@ Thumbs.db
 
 # Selenium Chrome profile (if used)
 chrome_profile/
+.DS_Store
