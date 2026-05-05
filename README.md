@@ -1,6 +1,8 @@
 # LMS Downloader
 
-한 번 로그인으로 세션을 유지한 채, 여러 개의 **LMS 강의 페이지 URL**(예: `ys.learnus.org`, `plms.postech.ac.kr`)을 입력하면 각 페이지의 `<h1 class="vod-title">` 제목을 파일명으로 사용하여 **HLS(.m3u8) 영상을 ffmpeg로 순차 다운로드**하는 GUI 툴입니다.
+한 번 로그인으로 세션을 유지한 채, 여러 개의 **LMS 강의 페이지 URL**(예: `ys.learnus.org`, `plms.postech.ac.kr`)을 입력하면 **HLS(.m3u8) 영상을 ffmpeg로 순차 다운로드**하는 GUI 툴입니다.
+
+![App Screen](./imgs/app.png)
 
 - 로그인: Selenium이 크롬 창을 띄우면 사용자가 직접 로그인
 - 추출: `<video><source>` 또는 HTML에서 `.m3u8` URL 탐지
@@ -22,28 +24,25 @@
 ### 1) macOS
 
 ```bash
-brew install ffmpeg
-brew install python
+brew install ffmpeg python uv
 
 터미널 종료 후 재실행 (환경변수 설정 반영)
 
 cd <프로젝트-폴더>
 uv sync
+source .venv/bin/activate
+python3 main.py
 ```
 
 ### 2) Windows
 
 ```powershell
-winget install Gyan.FFmpeg
-# 또는 choco install ffmpeg
+winget install Gyan.FFmpeg astral-sh.uv
 
 터미널 종료 후 재실행 (환경변수 설정 반영)
 
 cd <프로젝트-폴더>
-python -m venv .venv
+uv sync
 .\.venv\Scripts\Activate.ps1
-
-pip install -r requirements.txt
-
 python main.py
 ```
