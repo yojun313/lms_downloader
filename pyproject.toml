@@ -1,0 +1,10 @@
+[project]
+name = "lms-downloader"
+version = "0.1.0"
+description = "A tool to download lecture videos from university LMS platforms"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pyqt5>=5.15.11",
+    "selenium>=4.43.0",
+]

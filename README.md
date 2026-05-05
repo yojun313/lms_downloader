@@ -28,12 +28,7 @@ brew install python
 터미널 종료 후 재실행 (환경변수 설정 반영)
 
 cd <프로젝트-폴더>
-python3 -m venv .venv
-source .venv/bin/activate
-
-pip install -r requirements.txt
-
-python main.py
+uv sync
 ```
 
 ### 2) Windows
