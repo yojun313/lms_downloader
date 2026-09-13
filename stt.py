@@ -53,6 +53,7 @@ OPENAI_MAX_BYTES = 24 * 1024 * 1024  # 공식 한도 25MB, 여유를 둠
 OPENAI_CHUNK_SECONDS = 600  # 한도 초과 시 10분 단위로 분할
 DEFAULT_OPENAI_MODEL = "whisper-1"
 AUTO = "auto"
+STREAM_LOG_STEP = 5  # 실시간 전사 시 로그에 진행률을 남기는 간격(%) — 전사 문장은 로그에 찍지 않음
 
 LogFn = Callable[[str], None]
 ProgressFn = Callable[[int, str], None]  # (percent 0~100, message)
@@ -446,6 +447,7 @@ def transcribe_custom_stream(cfg: SttConfig, audio_path: str, log: LogFn, progre
     lines: list[str] = []
     done = False
     last_pct = -1
+    last_logged_pct = -1  # 로그에는 전사 문장 대신 진행률만 STREAM_LOG_STEP % 단위로 남긴다
     try:
         for raw in res.iter_lines(decode_unicode=True):
             if not raw:
@@ -473,8 +475,11 @@ def transcribe_custom_stream(cfg: SttConfig, audio_path: str, log: LogFn, progre
                 lines.append(f"[{_custom_ts(start)} - {_custom_ts(end)}] {text}")
                 pct = min(99, int(100 * end / duration)) if duration > 0 else max(last_pct, 8)
                 last_pct = max(last_pct, pct)
-                log(f"[STT {last_pct:3d}%] [{_fmt_ts(start)}] {text}\n")
-                progress(last_pct, f"{_fmt_ts(end)} / {_fmt_ts(duration)}")
+                pos = f"{_fmt_ts(end)} / {_fmt_ts(duration)}"
+                if last_pct - last_logged_pct >= STREAM_LOG_STEP:
+                    log(f"[STT] 진행 {last_pct}% ({pos})\n")
+                    last_logged_pct = last_pct
+                progress(last_pct, pos)
             elif kind == "error":
                 raise RuntimeError(f"커스텀 STT 오류: {ev.get('message')}")
             elif kind == "done":
