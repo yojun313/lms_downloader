@@ -7,10 +7,20 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
-from PyQt5.QtCore import QProcess
+from PyQt5.QtCore import QProcess, QThread, pyqtSignal
 from PyQt5.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QLabel,
-    QPushButton, QFileDialog, QPlainTextEdit, QMessageBox, QCheckBox, QTextEdit
+    QApplication,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLineEdit,
+    QLabel,
+    QPushButton,
+    QFileDialog,
+    QPlainTextEdit,
+    QMessageBox,
+    QCheckBox,
+    QTextEdit,
 )
 
 from selenium import webdriver
@@ -18,33 +28,51 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import NoSuchElementException, UnexpectedAlertPresentException, NoAlertPresentException
+from selenium.common.exceptions import (
+    NoSuchElementException,
+    UnexpectedAlertPresentException,
+    NoAlertPresentException,
+)
 import platform
 from datetime import datetime
 
+import stt
+
 
 # 파일 상단 import 근처
-from PyQt5.QtWidgets import QStyleFactory, QTableWidget, QTableWidgetItem, QHeaderView, QProgressBar, QGroupBox, QGridLayout, QSplitter
+from PyQt5.QtWidgets import (
+    QStyleFactory,
+    QTableWidget,
+    QTableWidgetItem,
+    QHeaderView,
+    QProgressBar,
+    QGroupBox,
+    QGridLayout,
+    QSplitter,
+)
 from PyQt5.QtGui import QIcon, QFont
 from PyQt5.QtCore import Qt
+
 
 def apply_modern_theme(app: QApplication):
     app.setStyle(QStyleFactory.create("Fusion"))
     pal = app.palette()
-    pal.setColor(pal.Window,        Qt.black)
-    pal.setColor(pal.WindowText,    Qt.white)
-    pal.setColor(pal.Base,          Qt.black)
+    pal.setColor(pal.Window, Qt.black)
+    pal.setColor(pal.WindowText, Qt.white)
+    pal.setColor(pal.Base, Qt.black)
     pal.setColor(pal.AlternateBase, Qt.black)
-    pal.setColor(pal.ToolTipBase,   Qt.white)
-    pal.setColor(pal.ToolTipText,   Qt.black)
-    pal.setColor(pal.Text,          Qt.white)
-    pal.setColor(pal.Button,        Qt.black)
-    pal.setColor(pal.ButtonText,    Qt.white)
-    pal.setColor(pal.Highlight,     Qt.darkGray)
+    pal.setColor(pal.ToolTipBase, Qt.white)
+    pal.setColor(pal.ToolTipText, Qt.black)
+    pal.setColor(pal.Text, Qt.white)
+    pal.setColor(pal.Button, Qt.black)
+    pal.setColor(pal.ButtonText, Qt.white)
+    pal.setColor(pal.Highlight, Qt.darkGray)
     pal.setColor(pal.HighlightedText, Qt.white)
     app.setPalette(pal)
 
-    app.setFont(QFont("Apple SD Gothic Neo" if sys.platform == "darwin" else "Segoe UI", 11))
+    app.setFont(
+        QFont("Apple SD Gothic Neo" if sys.platform == "darwin" else "Segoe UI", 11)
+    )
 
     app.setStyleSheet("""
     QWidget { font-size: 11pt; }
@@ -87,6 +115,7 @@ def open_folder(path: str):
     else:  # Linux and other OS
         os.system(f"xdg-open '{path}'")
 
+
 # -------------------유틸 ----------------------
 def extract_id_from_url(u: str) -> str:
     """?id= 숫자 뽑기 (없으면 도메인+타임스탬프)"""
@@ -96,7 +125,7 @@ def extract_id_from_url(u: str) -> str:
             return q["id"][0]
     except Exception:
         pass
-    ts = str(int(time.time()*1000))
+    ts = str(int(time.time() * 1000))
     host = urlparse(u).netloc.replace(".", "_")
     return f"{host}_{ts}"
 
@@ -118,12 +147,12 @@ def sanitize_filename(name: str, max_len: int = 150) -> str:
     forbidden = '<>:"/\\|?*\0'
     name = "".join("" if ch in forbidden else ch for ch in name)
 
-    name = re.sub(r'(?<=[A-Za-z])\s+(?=[A-Za-z])', '', name)
-    name = re.sub(r'\s+', ' ', name)
-    name = re.sub(r'\s+,', ',', name)
-    name = re.sub(r'\s+([\)\]\}])', r'\1', name)
-    name = re.sub(r'\s*-\s*', ' - ', name)
-    name = re.sub(r'([\(\[\{])\s+', r'\1', name)
+    name = re.sub(r"(?<=[A-Za-z])\s+(?=[A-Za-z])", "", name)
+    name = re.sub(r"\s+", " ", name)
+    name = re.sub(r"\s+,", ",", name)
+    name = re.sub(r"\s+([\)\]\}])", r"\1", name)
+    name = re.sub(r"\s*-\s*", " - ", name)
+    name = re.sub(r"([\(\[\{])\s+", r"\1", name)
     name = "".join(ch if (ch.isprintable()) else " " for ch in name).strip()
 
     if not name:
@@ -155,6 +184,29 @@ def build_cookie_header_from_driver(driver, target_url: str) -> str:
     return "; ".join(pairs)
 
 
+# -------------------STT 워커 ----------------------
+class SttWorker(QThread):
+    """mp3 한 개를 백그라운드에서 전사해 txt로 저장."""
+
+    log = pyqtSignal(str)
+    done = pyqtSignal(str, str, bool, str)  # audio_path, txt_path, ok, message
+
+    def __init__(self, cfg: stt.SttConfig, audio_path: str, txt_path: str, parent=None):
+        super().__init__(parent)
+        self.cfg = cfg
+        self.audio_path = audio_path
+        self.txt_path = txt_path
+
+    def run(self):
+        try:
+            text = stt.transcribe_to_txt(
+                self.cfg, self.audio_path, self.txt_path, log=self.log.emit
+            )
+            self.done.emit(self.audio_path, self.txt_path, True, f"{len(text)}자")
+        except Exception as e:
+            self.done.emit(self.audio_path, self.txt_path, False, str(e))
+
+
 # -------------------메인 GUI ----------------------
 class HlsDownloader(QWidget):
     def __init__(self):
@@ -162,10 +214,17 @@ class HlsDownloader(QWidget):
         self.setWindowTitle("LMS Downloader")
         self.setMinimumWidth(920)
 
-        self.proc = None            # 현재 실행 중인 ffmpeg QProcess
-        self.driver = None          # Selenium driver (로그인 세션 유지)
-        self.pending_jobs = []      # (page_url, m3u8_url, out_file, referer)
+        self.proc = None  # 현재 실행 중인 ffmpeg QProcess
+        self.driver = None  # Selenium driver (로그인 세션 유지)
+        self.pending_jobs = []  # (page_url, m3u8_url, out_file, referer)
         self.current_job = None
+
+        # STT 상태
+        self.stt_cfg = stt.SttConfig.from_env()
+        self.use_stt = False
+        self.stt_queue = []  # (audio_path, txt_path)
+        self.stt_worker = None  # 현재 실행 중인 SttWorker
+        self.stt_failed = 0
 
         # URL들 입력 (여러 줄)
         self.urls_edit = QTextEdit()
@@ -192,7 +251,7 @@ class HlsDownloader(QWidget):
         self.btn_stop = QPushButton("현재 항목 중지")
         self.btn_close_browser = QPushButton("브라우저 닫기")
 
-        self.btn_fetch.setEnabled(False)        # 로그인 세션 준비 전에는 비활성화
+        self.btn_fetch.setEnabled(False)  # 로그인 세션 준비 전에는 비활성화
         self.btn_stop.setEnabled(False)
 
         self.btn_login.clicked.connect(self.start_browser_and_login)
@@ -214,7 +273,7 @@ class HlsDownloader(QWidget):
         for btn, primary in [
             (self.btn_login, False),
             (self.btn_fetch, True),
-            (self.btn_stop,  False),
+            (self.btn_stop, False),
             (self.btn_close_browser, False),
         ]:
             btn.setProperty("primary", "true" if primary else "false")
@@ -229,13 +288,16 @@ class HlsDownloader(QWidget):
         g1.setVerticalSpacing(8)
         row = 0
 
-        g1.addWidget(QLabel("LMS 강의 URL들 (줄바꿈 구분)"), row, 0, 1, 3); row += 1
+        g1.addWidget(QLabel("LMS 강의 URL들 (줄바꿈 구분)"), row, 0, 1, 3)
+        row += 1
         self.urls_edit.setMinimumHeight(100)
-        g1.addWidget(self.urls_edit, row, 0, 1, 3); row += 1
+        g1.addWidget(self.urls_edit, row, 0, 1, 3)
+        row += 1
 
         g1.addWidget(QLabel("저장 폴더"), row, 0)
         g1.addWidget(self.out_dir_edit, row, 1)
-        g1.addWidget(btn_dir, row, 2); row += 1
+        g1.addWidget(btn_dir, row, 2)
+        row += 1
 
         box_inputs.setLayout(g1)
         root.addWidget(box_inputs)
@@ -245,16 +307,36 @@ class HlsDownloader(QWidget):
         g2 = QGridLayout()
         r = 0
         g2.addWidget(QLabel("User-Agent"), r, 0)
-        g2.addWidget(self.ua_edit,       r, 1, 1, 2); r += 1
+        g2.addWidget(self.ua_edit, r, 1, 1, 2)
+        r += 1
 
         optrow = QHBoxLayout()
-        
+
         self.chk_mp3 = QCheckBox("MP3로 변환 저장")
         self.chk_mp3.setChecked(False)
         optrow.addWidget(self.chk_copy)
         optrow.addWidget(self.chk_mp3)
         optrow.addStretch(1)
-        g2.addLayout(optrow, r, 0, 1, 3); r += 1
+        g2.addLayout(optrow, r, 0, 1, 3)
+        r += 1
+
+        # STT 옵션 (mp3 저장 시에만 사용 가능)
+        sttrow = QHBoxLayout()
+        self.chk_stt = QCheckBox("STT 텍스트(.txt) 함께 저장")
+        self.chk_stt.setChecked(False)
+        self.chk_stt.setEnabled(False)
+        self.lbl_stt = QLabel(
+            f"STT 엔진: {self.stt_cfg.describe()}  (.env 의 STT_PROVIDER)"
+        )
+        self.lbl_stt.setStyleSheet("color: #9a9a9a;")
+        sttrow.addWidget(self.chk_stt)
+        sttrow.addWidget(self.lbl_stt)
+        sttrow.addStretch(1)
+        g2.addLayout(sttrow, r, 0, 1, 3)
+        r += 1
+
+        self.chk_mp3.toggled.connect(self.on_mp3_toggled)
+        self.chk_stt.toggled.connect(self.on_stt_toggled)
 
         box_opts.setLayout(g2)
         root.addWidget(box_opts)
@@ -267,8 +349,12 @@ class HlsDownloader(QWidget):
         self.tbl = QTableWidget(0, 4, self)
         self.tbl.setHorizontalHeaderLabels(["URL", "제목", "상태", "출력 파일"])
         self.tbl.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.tbl.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.tbl.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.tbl.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeToContents
+        )
+        self.tbl.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeToContents
+        )
         self.tbl.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self.tbl.verticalHeader().setVisible(False)
         self.tbl.setSelectionBehavior(self.tbl.SelectRows)
@@ -290,14 +376,15 @@ class HlsDownloader(QWidget):
         # 하단 상태바
         status = QHBoxLayout()
         self.progress = QProgressBar()
-        self.progress.setMinimum(0); self.progress.setMaximum(100); self.progress.setValue(0)
+        self.progress.setMinimum(0)
+        self.progress.setMaximum(100)
+        self.progress.setValue(0)
         self.lbl_status = QLabel("대기 중")
         status.addWidget(self.lbl_status)
         status.addStretch(1)
         status.addWidget(self.progress)
         root.addLayout(status)
         # 레이아웃 (교체 끝)
-
 
     def open_output_dir(self):
         out_dir = Path(self.out_dir_edit.text().strip() or ".").resolve()
@@ -306,14 +393,41 @@ class HlsDownloader(QWidget):
             self.append_log(f"[INFO] 탐색기 열기: {out_dir}\n")
         except Exception as e:
             self.append_log(f"[WARN] 탐색기 열기 실패: {e}\n")
-    
+
+    def on_mp3_toggled(self, checked: bool):
+        # STT는 mp3 출력이 있어야 가능
+        self.chk_stt.setEnabled(checked)
+        if not checked:
+            self.chk_stt.setChecked(False)
+
+    def on_stt_toggled(self, checked: bool):
+        if not checked:
+            return
+        self.stt_cfg = (
+            stt.SttConfig.from_env()
+        )  # .env 수정 후 재확인 가능하도록 다시 읽기
+        self.lbl_stt.setText(
+            f"STT 엔진: {self.stt_cfg.describe()}  (.env 의 STT_PROVIDER)"
+        )
+        err = self.stt_cfg.validate()
+        if err:
+            QMessageBox.warning(
+                self,
+                "STT 설정 필요",
+                f"{err}\n\n.env.example 을 참고해 .env 를 작성하세요.",
+            )
+            self.chk_stt.setChecked(False)
+
     def append_log(self, text: str):
         ts = datetime.now().strftime("[%H:%M:%S] ")
         # 여러 줄 들어올 때도 앞줄에만 타임스탬프 달기
         if text.endswith("\n"):
             text = text[:-1]
         lines = text.split("\n")
-        stamped = "\n".join([ (ts + lines[0]) ] + [(" " * len(ts) + L) for L in lines[1:]]) + "\n"
+        stamped = (
+            "\n".join([(ts + lines[0])] + [(" " * len(ts) + L) for L in lines[1:]])
+            + "\n"
+        )
         self.log.moveCursor(self.log.textCursor().End)
         self.log.insertPlainText(stamped)
         self.log.moveCursor(self.log.textCursor().End)
@@ -326,9 +440,13 @@ class HlsDownloader(QWidget):
             return
 
         # URL 입력 칸에서 첫 줄을 가져와 base 도메인 산출
-        urls = [u.strip() for u in self.urls_edit.toPlainText().splitlines() if u.strip()]
+        urls = [
+            u.strip() for u in self.urls_edit.toPlainText().splitlines() if u.strip()
+        ]
         if not urls:
-            QMessageBox.warning(self, "입력 필요", "먼저 상단에 LMS 강의 URL(최소 1개)을 입력하세요.")
+            QMessageBox.warning(
+                self, "입력 필요", "먼저 상단에 LMS 강의 URL(최소 1개)을 입력하세요."
+            )
             return
         first_url = urls[0]
         start_url = get_base_url(first_url)
@@ -343,14 +461,17 @@ class HlsDownloader(QWidget):
         driver.get(start_url)
 
         QMessageBox.information(
-            self, "로그인 안내",
+            self,
+            "로그인 안내",
             "열린 브라우저에서 LMS 로그인을 완료하세요.\n"
-            "로그인 완료 후 이 창으로 돌아와 ‘추출+다운로드 시작’을 눌러 주세요."
+            "로그인 완료 후 이 창으로 돌아와 ‘추출+다운로드 시작’을 눌러 주세요.",
         )
 
         self.driver = driver
         self.btn_fetch.setEnabled(True)
-        self.append_log("[OK] 로그인 세션 준비 완료. 이제 '추출+다운로드 시작'을 누르세요.\n")
+        self.append_log(
+            "[OK] 로그인 세션 준비 완료. 이제 '추출+다운로드 시작'을 누르세요.\n"
+        )
 
     def close_browser(self):
         if self.driver:
@@ -363,20 +484,42 @@ class HlsDownloader(QWidget):
 
     def start_batch(self):
         if not self.driver:
-            QMessageBox.warning(self, "로그인 필요", "먼저 '로그인 시작'으로 브라우저를 열고 로그인하세요.")
+            QMessageBox.warning(
+                self,
+                "로그인 필요",
+                "먼저 '로그인 시작'으로 브라우저를 열고 로그인하세요.",
+            )
             return
 
-        urls = [u.strip() for u in self.urls_edit.toPlainText().splitlines() if u.strip()]
+        urls = [
+            u.strip() for u in self.urls_edit.toPlainText().splitlines() if u.strip()
+        ]
         if not urls:
-            QMessageBox.warning(self, "입력 필요", "LMS 강의 URL을 한 줄에 하나씩 입력하세요.")
+            QMessageBox.warning(
+                self, "입력 필요", "LMS 강의 URL을 한 줄에 하나씩 입력하세요."
+            )
             return
 
         out_dir = Path(self.out_dir_edit.text().strip() or ".").resolve()
         out_dir.mkdir(parents=True, exist_ok=True)
 
+        # STT 설정 검증 (체크된 경우만)
+        self.use_stt = self.chk_mp3.isChecked() and self.chk_stt.isChecked()
+        if self.use_stt:
+            self.stt_cfg = stt.SttConfig.from_env()
+            err = self.stt_cfg.validate()
+            if err:
+                QMessageBox.warning(self, "STT 설정 필요", err)
+                return
+            self.append_log(
+                f"[INFO] STT 사용: {self.stt_cfg.describe()}, 언어={self.stt_cfg.language}\n"
+            )
+
         # 큐 초기화
         self.pending_jobs.clear()
         self.current_job = None
+        self.stt_queue.clear()
+        self.stt_failed = 0
 
         # 각 URL에서 m3u8/제목을 추출해 큐에 넣음 (순차)
         existing_outputs = set()
@@ -423,28 +566,22 @@ class HlsDownloader(QWidget):
                 self.append_log(f"[ERROR] 추출 중 오류: {page_url} | {e}\n")
 
         if not self.pending_jobs:
-            self.append_log("[DONE] 모든 다운로드 완료.\n")
+            self.append_log("[WARN] 다운로드할 항목이 없습니다.\n")
             self.btn_stop.setEnabled(False)
-
-            # 탐색기 열기
-            out_dir = Path(self.out_dir_edit.text().strip() or ".").resolve()
-            try:
-                open_folder(str(out_dir))
-                self.append_log(f"[INFO] 탐색기 열기: {out_dir}\n")
-            except Exception as e:
-                self.append_log(f"[WARN] 탐색기 열기 실패: {e}\n")
-
             return
 
         self.append_log(f"[INFO] 총 {len(self.pending_jobs)}개 항목 다운로드 시작...\n")
         self.run_next_job()
 
     def _find_row_for_current(self) -> int:
-        if not self.current_job: 
+        if not self.current_job:
             return -1
         page_url, _, out_file, _ = self.current_job
         for r in range(self.tbl.rowCount()):
-            if self.tbl.item(r, 0).text() == page_url and self.tbl.item(r, 3).text() == out_file:
+            if (
+                self.tbl.item(r, 0).text() == page_url
+                and self.tbl.item(r, 3).text() == out_file
+            ):
                 return r
         return -1
 
@@ -457,14 +594,16 @@ class HlsDownloader(QWidget):
             alert = self.driver.switch_to.alert
             text = alert.text
             self.append_log(f"[INFO] 알림 발견: {text}\n → 자동 '확인' 클릭\n")
-            alert.accept()   # 확인(=이어보기)
+            alert.accept()  # 확인(=이어보기)
         except NoAlertPresentException:
             pass
         except UnexpectedAlertPresentException:
             try:
                 alert = self.driver.switch_to.alert
                 text = alert.text
-                self.append_log(f"[INFO] 알림(예외) 발견: {text}\n → 자동 '확인' 클릭\n")
+                self.append_log(
+                    f"[INFO] 알림(예외) 발견: {text}\n → 자동 '확인' 클릭\n"
+                )
                 alert.accept()
             except Exception:
                 pass
@@ -494,7 +633,7 @@ class HlsDownloader(QWidget):
         m = re.search(r'https?://[^\s"\']+?\.m3u8[^\s"\']*', html)
         src = m.group(0) if m else ""
         return src, title
-    
+
     def extract_title_from_page(self) -> str:
         """현재 페이지에서 <h1 class='vod-title'> 텍스트 추출 (없으면 빈 문자열)"""
         try:
@@ -505,34 +644,36 @@ class HlsDownloader(QWidget):
 
     def run_next_job(self):
 
-
         if self.proc and self.proc.state() != QProcess.NotRunning:
             return  # 현재 작업이 끝나길 기다림
 
         if not self.pending_jobs:
             self.append_log("[DONE] 모든 다운로드 완료.\n")
             self.btn_stop.setEnabled(False)
-            # 모든 작업 종료 시 저장 폴더 자동 열기
-            self.open_output_dir()
+            self._finish_if_idle()
             return
 
         self.current_job = self.pending_jobs.pop(0)
         page_url, m3u8, out_file, referer = self.current_job
 
-                # 진행률/상태
+        # 진행률/상태
         total = len(self.pending_jobs) + 1  # 현재 포함
-        done  = 0
+        done = 0
         self.progress.setMaximum(total)
-        self.progress.setValue(self.progress.maximum() - len(self.pending_jobs) - 1)  # 이미 끝난 개수
+        self.progress.setValue(
+            self.progress.maximum() - len(self.pending_jobs) - 1
+        )  # 이미 끝난 개수
         self.lbl_status.setText("다운로드 중...")
 
         # 테이블 상태 표시
         r = self._find_row_for_current()
         if r >= 0:
             self.tbl.item(r, 2).setText("진행 중")
-            
+
         if not self.is_ffmpeg_available():
-            QMessageBox.critical(self, "ffmpeg 미설치", "ffmpeg 실행 파일을 찾을 수 없습니다.")
+            QMessageBox.critical(
+                self, "ffmpeg 미설치", "ffmpeg 실행 파일을 찾을 수 없습니다."
+            )
             self.pending_jobs.clear()
             return
 
@@ -540,15 +681,22 @@ class HlsDownloader(QWidget):
             "ffmpeg",
             "-nostdin",
             "-hide_banner",
-            "-loglevel", "info",
+            "-loglevel",
+            "info",
             "-stats",
             # 네트워크 안정 옵션
-            "-reconnect", "1",
-            "-reconnect_streamed", "1",
-            "-reconnect_on_network_error", "1",
-            "-reconnect_at_eof", "1",
-            "-rw_timeout", "20000000",
-            "-timeout", "20000000",
+            "-reconnect",
+            "1",
+            "-reconnect_streamed",
+            "1",
+            "-reconnect_on_network_error",
+            "1",
+            "-reconnect_at_eof",
+            "1",
+            "-rw_timeout",
+            "20000000",
+            "-timeout",
+            "20000000",
         ]
 
         # 헤더 (Referer + UA + Cookie[선택])
@@ -575,19 +723,32 @@ class HlsDownloader(QWidget):
         if self.chk_mp3.isChecked():
             # 오디오만 mp3로 변환
             cmd += [
-                "-map", "0:a:0",
+                "-map",
+                "0:a:0",
                 "-vn",
-                "-c:a", "libmp3lame",
-                "-b:a", "192k",
+                "-c:a",
+                "libmp3lame",
+                "-b:a",
+                "192k",
             ]
         else:
             if self.chk_copy.isChecked():
                 cmd += ["-map", "0:v:0?", "-map", "0:a:0?", "-c", "copy"]
             else:
-                cmd += ["-map", "0:v:0?", "-map", "0:a:0?", "-c:v", "libx264", "-c:a", "aac", "-b:a", "192k"]
+                cmd += [
+                    "-map",
+                    "0:v:0?",
+                    "-map",
+                    "0:a:0?",
+                    "-c:v",
+                    "libx264",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "192k",
+                ]
 
         cmd += [out_file]
-        
 
         self.proc = QProcess(self)
         self.proc.setProcessChannelMode(QProcess.MergedChannels)
@@ -595,8 +756,14 @@ class HlsDownloader(QWidget):
         self.proc.readyReadStandardError.connect(self.on_read_output)
         self.proc.finished.connect(self.on_finished_one)
 
-        mode = "MP3 변환" if self.chk_mp3.isChecked() else ("copy" if self.chk_copy.isChecked() else "re-encode")
-        self.append_log(f"[RUN] {page_url}\n      → {out_file}\n      모드: {mode}\n      ffmpeg: {' '.join(cmd)}\n")
+        mode = (
+            "MP3 변환"
+            if self.chk_mp3.isChecked()
+            else ("copy" if self.chk_copy.isChecked() else "re-encode")
+        )
+        self.append_log(
+            f"[RUN] {page_url}\n      → {out_file}\n      모드: {mode}\n      ffmpeg: {' '.join(cmd)}\n"
+        )
 
         self.btn_stop.setEnabled(True)
         self.proc.start(cmd[0], cmd[1:])
@@ -618,24 +785,105 @@ class HlsDownloader(QWidget):
 
     def on_finished_one(self, code, status):
         page_url, m3u8, out_file, _ = self.current_job or ("", "", "", "")
-        ok = (code == 0)
+        ok = code == 0
         self.append_log(f"\n[INFO] 완료(code={code}): {out_file}\n\n")
 
         r = self._find_row_for_current()
         if r >= 0:
             self.tbl.item(r, 2).setText("완료" if ok else "실패")
 
+        # mp3 + STT 옵션이면 전사 큐에 등록 (다운로드와 병렬로 진행)
+        if (
+            ok
+            and getattr(self, "use_stt", False)
+            and out_file.lower().endswith(".mp3")
+            and os.path.exists(out_file)
+        ):
+            txt_file = str(Path(out_file).with_suffix(".txt"))
+            self.stt_queue.append((out_file, txt_file))
+            if r >= 0:
+                self.tbl.item(r, 2).setText("완료 · STT 대기")
+            self._run_next_stt()
+
         # 진행률 증가
         self.progress.setValue(self.progress.value() + 1)
         if not self.pending_jobs:
-            self.lbl_status.setText("모든 작업 완료")
+            self.lbl_status.setText(
+                "다운로드 완료" if self._stt_busy() else "모든 작업 완료"
+            )
         else:
-            self.lbl_status.setText(f"다음 작업 준비 중... (남은 {len(self.pending_jobs)}개)")
+            self.lbl_status.setText(
+                f"다음 작업 준비 중... (남은 {len(self.pending_jobs)}개)"
+            )
 
         self.btn_stop.setEnabled(False)
         self.current_job = None
         self.run_next_job()
 
+    # ------------------- STT -------------------
+    def _stt_busy(self) -> bool:
+        return bool(self.stt_queue) or (self.stt_worker is not None)
+
+    def _find_row_for_output(self, out_file: str) -> int:
+        for r in range(self.tbl.rowCount()):
+            if self.tbl.item(r, 3).text() == out_file:
+                return r
+        return -1
+
+    def _run_next_stt(self):
+        if self.stt_worker is not None or not self.stt_queue:
+            return
+        audio_path, txt_path = self.stt_queue.pop(0)
+        r = self._find_row_for_output(audio_path)
+        if r >= 0:
+            self.tbl.item(r, 2).setText("완료 · STT 중")
+        self.append_log(f"[STT] 전사 시작: {audio_path}\n      → {txt_path}\n")
+
+        self.stt_worker = SttWorker(self.stt_cfg, audio_path, txt_path, self)
+        self.stt_worker.log.connect(self.append_log)
+        self.stt_worker.done.connect(self.on_stt_done)
+        self.stt_worker.start()
+
+    def on_stt_done(self, audio_path: str, txt_path: str, ok: bool, msg: str):
+        r = self._find_row_for_output(audio_path)
+        if ok:
+            self.append_log(f"[STT] 완료({msg}): {txt_path}\n")
+            if r >= 0:
+                self.tbl.item(r, 2).setText("완료 · txt")
+        else:
+            self.stt_failed += 1
+            self.append_log(f"[STT][ERROR] 실패: {audio_path}\n      {msg}\n")
+            if r >= 0:
+                self.tbl.item(r, 2).setText("완료 · STT 실패")
+
+        worker = self.stt_worker
+        self.stt_worker = None
+        if worker is not None:
+            worker.deleteLater()
+
+        if self.stt_queue:
+            self._run_next_stt()
+        else:
+            self._finish_if_idle()
+
+    def _finish_if_idle(self):
+        """다운로드와 STT가 모두 끝났을 때 한 번만 마무리(폴더 열기)."""
+        if self.pending_jobs or (
+            self.proc and self.proc.state() != QProcess.NotRunning
+        ):
+            return
+        if self._stt_busy():
+            self.lbl_status.setText(
+                f"STT 진행 중... (남은 {len(self.stt_queue) + 1}개)"
+            )
+            return
+        if getattr(self, "use_stt", False):
+            if self.stt_failed:
+                self.append_log(f"[DONE] STT 완료 (실패 {self.stt_failed}개).\n")
+            else:
+                self.append_log("[DONE] STT 완료.\n")
+        self.lbl_status.setText("모든 작업 완료")
+        self.open_output_dir()
 
     def stop_current(self):
         if self.proc and self.proc.state() != QProcess.NotRunning:
@@ -645,19 +893,22 @@ class HlsDownloader(QWidget):
             self.btn_stop.setEnabled(False)
 
     def choose_out_dir(self):
-        d = QFileDialog.getExistingDirectory(self, "저장 폴더 선택", self.out_dir_edit.text())
+        d = QFileDialog.getExistingDirectory(
+            self, "저장 폴더 선택", self.out_dir_edit.text()
+        )
         if d:
             self.out_dir_edit.setText(d)
 
     @staticmethod
     def is_ffmpeg_available() -> bool:
         from shutil import which
+
         return which("ffmpeg") is not None
 
 
 def main():
     app = QApplication(sys.argv)
-    apply_modern_theme(app)   # ★ 추가
+    apply_modern_theme(app)  # ★ 추가
     w = HlsDownloader()
     w.show()
     sys.exit(app.exec_())

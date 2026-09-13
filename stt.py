@@ -1,0 +1,252 @@
+# stt.py
+"""
+STT(음성 → 텍스트) 모듈.
+
+.env 설정:
+  STT_PROVIDER=openai | custom      # 어떤 API를 쓸지
+  STT_LANGUAGE=ko                   # 공통 언어 코드
+
+  # provider=openai
+  OPENAI_API_KEY=sk-...
+  OPENAI_STT_MODEL=whisper-1        # whisper-1 | gpt-4o-transcribe | gpt-4o-mini-transcribe
+
+  # provider=custom (매니저앱 whisper API)
+  CUSTOM_STT_TOKEN=...              # 매니저앱 /token 값
+  CUSTOM_STT_URL=https://manager.knpu.re.kr/api/analysis/whisper
+  CUSTOM_STT_MODEL=2                # 1=small(빠름), 2=medium(권장), 3=large(정확)
+"""
+
+import json
+import os
+import subprocess
+import tempfile
+import uuid
+from dataclasses import dataclass
+from pathlib import Path
+from shutil import which
+from typing import Callable, Optional
+
+import requests
+from dotenv import load_dotenv
+
+# .env는 프로젝트 루트(이 파일 옆) 기준으로 읽는다.
+ENV_PATH = Path(__file__).resolve().parent / ".env"
+load_dotenv(ENV_PATH)
+
+DEFAULT_CUSTOM_URL = "https://manager.knpu.re.kr/api/analysis/whisper"
+OPENAI_URL = "https://api.openai.com/v1/audio/transcriptions"
+OPENAI_MAX_BYTES = 24 * 1024 * 1024  # 공식 한도 25MB, 여유를 둠
+OPENAI_CHUNK_SECONDS = 600  # 한도 초과 시 10분 단위로 분할
+
+LogFn = Callable[[str], None]
+
+
+@dataclass
+class SttConfig:
+    provider: str
+    language: str
+    openai_api_key: str = ""
+    openai_model: str = "whisper-1"
+    custom_token: str = ""
+    custom_url: str = DEFAULT_CUSTOM_URL
+    custom_model: int = 2
+
+    @classmethod
+    def from_env(cls) -> "SttConfig":
+        # 앱 실행 중 .env 를 고쳐도 다시 읽히도록 매번 로드
+        load_dotenv(ENV_PATH, override=True)
+        try:
+            custom_model = int(os.getenv("CUSTOM_STT_MODEL", "2"))
+        except ValueError:
+            custom_model = 2
+        return cls(
+            provider=(os.getenv("STT_PROVIDER") or "").strip().lower(),
+            language=(os.getenv("STT_LANGUAGE") or "ko").strip(),
+            openai_api_key=(os.getenv("OPENAI_API_KEY") or "").strip(),
+            openai_model=(os.getenv("OPENAI_STT_MODEL") or "whisper-1").strip(),
+            custom_token=(os.getenv("CUSTOM_STT_TOKEN") or "").strip(),
+            custom_url=(os.getenv("CUSTOM_STT_URL") or DEFAULT_CUSTOM_URL).strip(),
+            custom_model=custom_model,
+        )
+
+    def describe(self) -> str:
+        """UI에 표시할 짧은 설명."""
+        if self.provider == "openai":
+            return f"OpenAI ({self.openai_model})"
+        if self.provider == "custom":
+            host = self.custom_url.split("//", 1)[-1].split("/", 1)[0]
+            return f"Custom ({host}, model={self.custom_model})"
+        return "미설정"
+
+    def validate(self) -> Optional[str]:
+        """설정이 불완전하면 이유를 문자열로 반환, 정상이면 None."""
+        if self.provider not in ("openai", "custom"):
+            return f"STT_PROVIDER 값이 'openai' 또는 'custom' 이어야 합니다. (.env 위치: {ENV_PATH})"
+        if self.provider == "openai" and not self.openai_api_key:
+            return "OPENAI_API_KEY 가 .env 에 없습니다."
+        if self.provider == "custom" and not self.custom_token:
+            return "CUSTOM_STT_TOKEN 이 .env 에 없습니다."
+        return None
+
+
+# ------------------------------------------------------------------ 유틸
+def _fmt_ts(sec: float) -> str:
+    sec = max(0, int(sec))
+    h, rem = divmod(sec, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}"
+
+
+def _probe_duration(path: str) -> Optional[float]:
+    if which("ffprobe") is None:
+        return None
+    try:
+        out = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return float(out.stdout.strip())
+    except Exception:
+        return None
+
+
+def _split_audio(path: str, tmp_dir: str, seconds: int) -> list[str]:
+    """ffmpeg로 오디오를 seconds 단위 조각으로 분할(재인코딩 없음)."""
+    pattern = str(Path(tmp_dir) / "chunk_%03d.mp3")
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            path,
+            "-f",
+            "segment",
+            "-segment_time",
+            str(seconds),
+            "-c",
+            "copy",
+            pattern,
+        ],
+        check=True,
+        timeout=600,
+    )
+    return sorted(str(p) for p in Path(tmp_dir).glob("chunk_*.mp3"))
+
+
+# ------------------------------------------------------------------ providers
+def _transcribe_openai_file(
+    cfg: SttConfig, path: str, offset: float
+) -> tuple[str, Optional[float]]:
+    """단일 파일 전사. (텍스트, 파일 길이[초]) 반환."""
+    use_verbose = cfg.openai_model.startswith("whisper")
+    data = {"model": cfg.openai_model}
+    if cfg.language:
+        data["language"] = cfg.language
+    if use_verbose:
+        data["response_format"] = "verbose_json"
+        data["timestamp_granularities[]"] = "segment"
+    else:
+        data["response_format"] = "json"
+
+    with open(path, "rb") as f:
+        res = requests.post(
+            OPENAI_URL,
+            headers={"Authorization": f"Bearer {cfg.openai_api_key}"},
+            files={"file": (Path(path).name, f, "audio/mpeg")},
+            data=data,
+            timeout=3600,
+        )
+    if res.status_code >= 400:
+        raise RuntimeError(f"OpenAI API 오류 {res.status_code}: {res.text[:500]}")
+    body = res.json()
+
+    duration = body.get("duration") if isinstance(body, dict) else None
+    segments = body.get("segments") if isinstance(body, dict) else None
+    if segments:
+        lines = []
+        for seg in segments:
+            text = (seg.get("text") or "").strip()
+            if text:
+                lines.append(f"[{_fmt_ts(offset + float(seg.get('start', 0)))}] {text}")
+        return "\n".join(lines), duration
+    return (body.get("text") or "").strip(), duration
+
+
+def transcribe_openai(cfg: SttConfig, audio_path: str, log: LogFn) -> str:
+    size = os.path.getsize(audio_path)
+    if size <= OPENAI_MAX_BYTES:
+        text, _ = _transcribe_openai_file(cfg, audio_path, 0.0)
+        return text
+
+    log(
+        f"[STT] 파일 크기 {size / 1024 / 1024:.1f}MB > {OPENAI_MAX_BYTES / 1024 / 1024:.0f}MB 한도 → {OPENAI_CHUNK_SECONDS}초 단위로 분할 전사\n"
+    )
+    if which("ffmpeg") is None:
+        raise RuntimeError("파일이 25MB를 초과하지만 분할에 필요한 ffmpeg 가 없습니다.")
+
+    with tempfile.TemporaryDirectory(prefix="lms_stt_") as tmp:
+        chunks = _split_audio(audio_path, tmp, OPENAI_CHUNK_SECONDS)
+        parts = []
+        offset = 0.0
+        for i, chunk in enumerate(chunks, 1):
+            log(f"[STT] 조각 {i}/{len(chunks)} 전사 중...\n")
+            text, dur = _transcribe_openai_file(cfg, chunk, offset)
+            if text:
+                parts.append(text)
+            offset += _probe_duration(chunk) or dur or OPENAI_CHUNK_SECONDS
+        return "\n".join(parts)
+
+
+def transcribe_custom(cfg: SttConfig, audio_path: str, log: LogFn) -> str:
+    option = {
+        "pid": str(uuid.uuid4()),
+        "language": cfg.language or "ko",
+        "model": cfg.custom_model,
+    }
+    with open(audio_path, "rb") as f:
+        res = requests.post(
+            cfg.custom_url,
+            headers={"Authorization": f"Bearer {cfg.custom_token}"},
+            files={"file": (Path(audio_path).name, f, "audio/mpeg")},
+            data={"option": json.dumps(option)},
+            timeout=3600,  # 긴 음성은 전사에 몇 분씩 걸림
+        )
+    if res.status_code >= 400:
+        raise RuntimeError(f"Custom API 오류 {res.status_code}: {res.text[:500]}")
+    result = res.json()
+    text = result.get("text_with_time") or result.get("text") or ""
+    return text.strip()
+
+
+def transcribe(cfg: SttConfig, audio_path: str, log: LogFn = lambda s: None) -> str:
+    err = cfg.validate()
+    if err:
+        raise RuntimeError(err)
+    if cfg.provider == "openai":
+        return transcribe_openai(cfg, audio_path, log)
+    return transcribe_custom(cfg, audio_path, log)
+
+
+def transcribe_to_txt(
+    cfg: SttConfig, audio_path: str, txt_path: str, log: LogFn = lambda s: None
+) -> str:
+    """오디오를 전사해 txt_path 에 저장하고 텍스트를 반환."""
+    text = transcribe(cfg, audio_path, log)
+    Path(txt_path).write_text(
+        text + ("\n" if text and not text.endswith("\n") else ""), encoding="utf-8"
+    )
+    return text

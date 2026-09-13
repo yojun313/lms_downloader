@@ -6,5 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "pyqt5>=5.15.11",
+    "python-dotenv>=1.2.3",
+    "requests>=2.34.2",
     "selenium>=4.43.0",
 ]
