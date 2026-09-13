@@ -190,6 +190,7 @@ class SttWorker(QThread):
     """mp3 한 개를 백그라운드에서 전사해 txt로 저장."""
 
     log = pyqtSignal(str)
+    progress = pyqtSignal(str, int, str)  # audio_path, percent(0~100), message
     done = pyqtSignal(str, str, bool, str)  # audio_path, txt_path, ok, message
 
     def __init__(self, cfg: stt.SttConfig, audio_path: str, txt_path: str, parent=None):
@@ -201,7 +202,11 @@ class SttWorker(QThread):
     def run(self):
         try:
             text = stt.transcribe_to_txt(
-                self.cfg, self.audio_path, self.txt_path, log=self.log.emit
+                self.cfg,
+                self.audio_path,
+                self.txt_path,
+                log=self.log.emit,
+                progress=lambda p, m: self.progress.emit(self.audio_path, int(p), m),
             )
             self.done.emit(self.audio_path, self.txt_path, True, f"{len(text)}자")
         except Exception as e:
@@ -892,8 +897,28 @@ class HlsDownloader(QWidget):
 
         self.stt_worker = SttWorker(self.stt_cfg, audio_path, txt_path, self)
         self.stt_worker.log.connect(self.append_log)
+        self.stt_worker.progress.connect(self.on_stt_progress)
         self.stt_worker.done.connect(self.on_stt_done)
         self.stt_worker.start()
+
+    def _downloads_active(self) -> bool:
+        return bool(self.pending_jobs) or bool(self.proc and self.proc.state() != QProcess.NotRunning)
+
+    def on_stt_progress(self, audio_path: str, percent: int, message: str):
+        """STT 워커의 실시간 진행률 → 테이블 상태 / 하단 상태바 / (다운로드가 끝났으면) 진행 막대."""
+        percent = max(0, min(100, percent))
+        r = self._find_row_for_output(audio_path)
+        if r >= 0:
+            self.tbl.item(r, 2).setText(f"완료 · STT {percent}%")
+        remain = len(self.stt_queue)
+        tail = f" (대기 {remain}개)" if remain else ""
+        if self._downloads_active():
+            # 진행 막대는 다운로드 개수용으로 쓰는 중 → 상태 텍스트로만 표시
+            self.lbl_status.setText(f"다운로드 중 · STT {percent}% {message}{tail}")
+        else:
+            self.progress.setMaximum(100)
+            self.progress.setValue(percent)
+            self.lbl_status.setText(f"STT {percent}% · {message}{tail}")
 
     def on_stt_done(self, audio_path: str, txt_path: str, ok: bool, msg: str):
         r = self._find_row_for_output(audio_path)
@@ -934,6 +959,7 @@ class HlsDownloader(QWidget):
             else:
                 self.append_log("[DONE] STT 완료.\n")
         self.lbl_status.setText("모든 작업 완료")
+        self.progress.setValue(self.progress.maximum())
         self.open_output_dir()
 
     def stop_current(self):

@@ -9,4 +9,5 @@ dependencies = [
     "python-dotenv>=1.2.3",
     "requests>=2.34.2",
     "selenium>=4.43.0",
+    "websockets>=17.1",
 ]
