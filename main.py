@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
-from PyQt5.QtCore import QProcess, QThread, pyqtSignal
+from PyQt5.QtCore import QProcess, QThread, pyqtSignal, QSettings
 from PyQt5.QtWidgets import (
     QApplication,
     QWidget,
@@ -220,8 +220,12 @@ class HlsDownloader(QWidget):
         self.pending_jobs = []  # (page_url, m3u8_url, out_file, referer)
         self.current_job = None
 
-        # STT 상태
-        self.stt_cfg = stt.SttConfig.from_env()
+        # STT 상태 (엔진/언어 선택은 앱에 기억, 키/토큰은 .env)
+        self.settings = QSettings("lms_downloader", "app")
+        saved_provider = str(self.settings.value("stt/provider", stt.PROVIDER_CUSTOM))
+        if saved_provider not in stt.PROVIDERS.values():
+            saved_provider = stt.PROVIDER_CUSTOM
+        self.stt_cfg = stt.SttConfig.from_env(saved_provider)
         self.use_stt = False
         self.stt_queue = []  # (audio_path, txt_path)
         self.stt_worker = None  # 현재 실행 중인 SttWorker
@@ -326,20 +330,28 @@ class HlsDownloader(QWidget):
         self.chk_stt = QCheckBox("STT 텍스트(.txt) 함께 저장")
         self.chk_stt.setChecked(False)
         self.chk_stt.setEnabled(False)
-        self.lbl_stt = QLabel(
-            f"STT 엔진: {self.stt_cfg.describe()}  (.env 의 OPENAI_STT_MODEL)"
-        )
+        self.lbl_stt = QLabel()
         self.lbl_stt.setStyleSheet("color: #9a9a9a;")
 
-        # 언어 선택 (기본값은 .env 의 STT_LANGUAGE)
+        # 엔진 선택 (커스텀 / OpenAI) — 마지막 선택을 기억
+        self.provider_combo = QComboBox()
+        for name, code in stt.PROVIDERS.items():
+            self.provider_combo.addItem(name, code)
+        self.provider_combo.setCurrentIndex(self.provider_combo.findData(self.stt_cfg.provider))
+        self.provider_combo.setEnabled(False)
+
+        # 언어 선택 (기본값은 마지막 선택 → 없으면 .env 의 STT_LANGUAGE → 자동 감지)
         self.lang_combo = QComboBox()
         for name, code in stt.LANGUAGES.items():
             self.lang_combo.addItem(f"{name} ({code})", code)
-        default_lang = self.stt_cfg.language if self.stt_cfg.language in stt.LANGUAGE_NAMES else stt.AUTO
+        saved_lang = str(self.settings.value("stt/language", self.stt_cfg.language))
+        default_lang = saved_lang if saved_lang in stt.LANGUAGE_NAMES else stt.AUTO
         self.lang_combo.setCurrentIndex(self.lang_combo.findData(default_lang))
         self.lang_combo.setEnabled(False)
 
         sttrow.addWidget(self.chk_stt)
+        sttrow.addWidget(QLabel("엔진"))
+        sttrow.addWidget(self.provider_combo)
         sttrow.addWidget(QLabel("언어"))
         sttrow.addWidget(self.lang_combo)
         sttrow.addWidget(self.lbl_stt)
@@ -349,6 +361,11 @@ class HlsDownloader(QWidget):
 
         self.chk_mp3.toggled.connect(self.on_mp3_toggled)
         self.chk_stt.toggled.connect(self.on_stt_toggled)
+        self.provider_combo.currentIndexChanged.connect(self.on_provider_changed)
+        self.lang_combo.currentIndexChanged.connect(
+            lambda _: self.settings.setValue("stt/language", self.lang_combo.currentData())
+        )
+        self._refresh_stt_label()
 
         box_opts.setLayout(g2)
         root.addWidget(box_opts)
@@ -412,24 +429,45 @@ class HlsDownloader(QWidget):
         if not checked:
             self.chk_stt.setChecked(False)
 
+    def _reload_stt_cfg(self) -> stt.SttConfig:
+        """앱에서 고른 엔진/언어 + .env 의 키/토큰으로 설정 재구성 (.env 수정 후에도 반영)."""
+        provider = self.provider_combo.currentData() or stt.PROVIDER_CUSTOM
+        self.stt_cfg = stt.SttConfig.from_env(provider)
+        self.stt_cfg.language = self.lang_combo.currentData() or stt.AUTO
+        return self.stt_cfg
+
+    def _refresh_stt_label(self):
+        cfg = self._reload_stt_cfg()
+        err = cfg.validate()
+        if err:
+            self.lbl_stt.setText(f"⚠ {err.split(' (')[0]}")
+            self.lbl_stt.setStyleSheet("color: #e0a030;")
+        else:
+            self.lbl_stt.setText(f"{cfg.describe()}  · 키/토큰은 .env")
+            self.lbl_stt.setStyleSheet("color: #9a9a9a;")
+
+    def on_provider_changed(self, _idx: int):
+        self.settings.setValue("stt/provider", self.provider_combo.currentData())
+        self._refresh_stt_label()
+        if self.chk_stt.isChecked() and self.stt_cfg.validate():
+            self._warn_stt_config()
+
+    def _warn_stt_config(self):
+        QMessageBox.warning(
+            self,
+            "STT 설정 필요",
+            f"{self.stt_cfg.validate()}\n\n.env.example 을 참고해 .env 를 작성하세요.",
+        )
+        self.chk_stt.setChecked(False)
+
     def on_stt_toggled(self, checked: bool):
+        self.provider_combo.setEnabled(checked)
         self.lang_combo.setEnabled(checked)
         if not checked:
             return
-        self.stt_cfg = (
-            stt.SttConfig.from_env()
-        )  # .env 수정 후 재확인 가능하도록 다시 읽기
-        self.lbl_stt.setText(
-            f"STT 엔진: {self.stt_cfg.describe()}  (.env 의 OPENAI_STT_MODEL)"
-        )
-        err = self.stt_cfg.validate()
-        if err:
-            QMessageBox.warning(
-                self,
-                "STT 설정 필요",
-                f"{err}\n\n.env.example 을 참고해 .env 를 작성하세요.",
-            )
-            self.chk_stt.setChecked(False)
+        self._refresh_stt_label()
+        if self.stt_cfg.validate():
+            self._warn_stt_config()
 
     def append_log(self, text: str):
         ts = datetime.now().strftime("[%H:%M:%S] ")
@@ -519,8 +557,7 @@ class HlsDownloader(QWidget):
         # STT 설정 검증 (체크된 경우만)
         self.use_stt = self.chk_mp3.isChecked() and self.chk_stt.isChecked()
         if self.use_stt:
-            self.stt_cfg = stt.SttConfig.from_env()
-            self.stt_cfg.language = self.lang_combo.currentData() or stt.AUTO  # 앱 선택이 .env 보다 우선
+            self._reload_stt_cfg()
             err = self.stt_cfg.validate()
             if err:
                 QMessageBox.warning(self, "STT 설정 필요", err)
