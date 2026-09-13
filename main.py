@@ -327,7 +327,7 @@ class HlsDownloader(QWidget):
         self.chk_stt.setChecked(False)
         self.chk_stt.setEnabled(False)
         self.lbl_stt = QLabel(
-            f"STT 엔진: {self.stt_cfg.describe()}  (.env 의 STT_PROVIDER)"
+            f"STT 엔진: {self.stt_cfg.describe()}  (.env 의 OPENAI_STT_MODEL)"
         )
         self.lbl_stt.setStyleSheet("color: #9a9a9a;")
 
@@ -335,7 +335,7 @@ class HlsDownloader(QWidget):
         self.lang_combo = QComboBox()
         for name, code in stt.LANGUAGES.items():
             self.lang_combo.addItem(f"{name} ({code})", code)
-        default_lang = self.stt_cfg.language if self.stt_cfg.language in stt.LANGUAGE_NAMES else "ko"
+        default_lang = self.stt_cfg.language if self.stt_cfg.language in stt.LANGUAGE_NAMES else stt.AUTO
         self.lang_combo.setCurrentIndex(self.lang_combo.findData(default_lang))
         self.lang_combo.setEnabled(False)
 
@@ -420,7 +420,7 @@ class HlsDownloader(QWidget):
             stt.SttConfig.from_env()
         )  # .env 수정 후 재확인 가능하도록 다시 읽기
         self.lbl_stt.setText(
-            f"STT 엔진: {self.stt_cfg.describe()}  (.env 의 STT_PROVIDER)"
+            f"STT 엔진: {self.stt_cfg.describe()}  (.env 의 OPENAI_STT_MODEL)"
         )
         err = self.stt_cfg.validate()
         if err:
@@ -520,14 +520,13 @@ class HlsDownloader(QWidget):
         self.use_stt = self.chk_mp3.isChecked() and self.chk_stt.isChecked()
         if self.use_stt:
             self.stt_cfg = stt.SttConfig.from_env()
-            self.stt_cfg.language = self.lang_combo.currentData() or "ko"  # 앱 선택이 .env 보다 우선
+            self.stt_cfg.language = self.lang_combo.currentData() or stt.AUTO  # 앱 선택이 .env 보다 우선
             err = self.stt_cfg.validate()
             if err:
                 QMessageBox.warning(self, "STT 설정 필요", err)
                 return
-            lang_name = stt.LANGUAGE_NAMES.get(self.stt_cfg.language, self.stt_cfg.language)
             self.append_log(
-                f"[INFO] STT 사용: {self.stt_cfg.describe()}, 언어={lang_name}({self.stt_cfg.language})\n"
+                f"[INFO] STT 사용: {self.stt_cfg.describe()}, 언어={self.stt_cfg.language_label()}\n"
             )
 
         # 큐 초기화
