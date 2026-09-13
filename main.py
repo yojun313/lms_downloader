@@ -49,6 +49,7 @@ from PyQt5.QtWidgets import (
     QGroupBox,
     QGridLayout,
     QSplitter,
+    QComboBox,
 )
 from PyQt5.QtGui import QIcon, QFont
 from PyQt5.QtCore import Qt
@@ -329,7 +330,18 @@ class HlsDownloader(QWidget):
             f"STT 엔진: {self.stt_cfg.describe()}  (.env 의 STT_PROVIDER)"
         )
         self.lbl_stt.setStyleSheet("color: #9a9a9a;")
+
+        # 언어 선택 (기본값은 .env 의 STT_LANGUAGE)
+        self.lang_combo = QComboBox()
+        for name, code in stt.LANGUAGES.items():
+            self.lang_combo.addItem(f"{name} ({code})", code)
+        default_lang = self.stt_cfg.language if self.stt_cfg.language in stt.LANGUAGE_NAMES else "ko"
+        self.lang_combo.setCurrentIndex(self.lang_combo.findData(default_lang))
+        self.lang_combo.setEnabled(False)
+
         sttrow.addWidget(self.chk_stt)
+        sttrow.addWidget(QLabel("언어"))
+        sttrow.addWidget(self.lang_combo)
         sttrow.addWidget(self.lbl_stt)
         sttrow.addStretch(1)
         g2.addLayout(sttrow, r, 0, 1, 3)
@@ -401,6 +413,7 @@ class HlsDownloader(QWidget):
             self.chk_stt.setChecked(False)
 
     def on_stt_toggled(self, checked: bool):
+        self.lang_combo.setEnabled(checked)
         if not checked:
             return
         self.stt_cfg = (
@@ -507,12 +520,14 @@ class HlsDownloader(QWidget):
         self.use_stt = self.chk_mp3.isChecked() and self.chk_stt.isChecked()
         if self.use_stt:
             self.stt_cfg = stt.SttConfig.from_env()
+            self.stt_cfg.language = self.lang_combo.currentData() or "ko"  # 앱 선택이 .env 보다 우선
             err = self.stt_cfg.validate()
             if err:
                 QMessageBox.warning(self, "STT 설정 필요", err)
                 return
+            lang_name = stt.LANGUAGE_NAMES.get(self.stt_cfg.language, self.stt_cfg.language)
             self.append_log(
-                f"[INFO] STT 사용: {self.stt_cfg.describe()}, 언어={self.stt_cfg.language}\n"
+                f"[INFO] STT 사용: {self.stt_cfg.describe()}, 언어={lang_name}({self.stt_cfg.language})\n"
             )
 
         # 큐 초기화

@@ -56,6 +56,6 @@ python main.py
 2. `STT_PROVIDER` 로 사용할 엔진을 고릅니다.
    - `openai`: `OPENAI_API_KEY` 필요. 모델은 `OPENAI_STT_MODEL` (기본 `whisper-1`, 타임스탬프 포함). 25MB 초과 파일은 자동으로 10분 단위 분할 전사.
    - `custom`: 매니저앱 Whisper API. `CUSTOM_STT_TOKEN` (매니저앱 `/token` 값) 필요, `CUSTOM_STT_MODEL` 1=small / 2=medium / 3=large.
-3. 앱에서 **MP3로 변환 저장** → **STT 텍스트(.txt) 함께 저장** 을 체크하고 다운로드하면 `제목.mp3` 옆에 `제목.txt` 가 생성됩니다.
+3. 앱에서 **MP3로 변환 저장** → **STT 텍스트(.txt) 함께 저장** 을 체크하고, 옆의 **언어** 드롭다운(기본값은 `.env` 의 `STT_LANGUAGE`)에서 언어를 고른 뒤 다운로드하면 `제목.mp3` 옆에 `제목.txt` 가 생성됩니다.
 
 전사는 다운로드와 병렬로 백그라운드에서 진행되며, 모든 다운로드·전사가 끝나면 저장 폴더가 열립니다.

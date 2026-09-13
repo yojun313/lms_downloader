@@ -40,6 +40,26 @@ OPENAI_CHUNK_SECONDS = 600  # 한도 초과 시 10분 단위로 분할
 
 LogFn = Callable[[str], None]
 
+# 지원 언어 (매니저앱 WhisperOptionDialog 와 동일). 표시명 → 코드
+LANGUAGES = {
+    "한국어": "ko",
+    "영어": "en",
+    "일본어": "ja",
+    "중국어": "zh",
+    "프랑스어": "fr",
+    "독일어": "de",
+    "스페인어": "es",
+    "이탈리아어": "it",
+    "포르투갈어": "pt",
+    "러시아어": "ru",
+    "아랍어": "ar",
+    "힌디어": "hi",
+    "태국어": "th",
+    "베트남어": "vi",
+    "인도네시아어": "id",
+}
+LANGUAGE_NAMES = {code: name for name, code in LANGUAGES.items()}
+
 
 @dataclass
 class SttConfig:
